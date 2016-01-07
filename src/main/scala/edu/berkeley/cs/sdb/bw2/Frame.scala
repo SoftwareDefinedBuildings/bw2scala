@@ -34,101 +34,103 @@ object Frame {
     Math.abs(random.nextInt())
 
   def readFromStream(stream: InputStream): Try[Frame] = {
-    val frameHeader = new String(readUntil(stream, '\n'), StandardCharsets.UTF_8)
+    Try {
+      val frameHeader = new String(readUntil(stream, '\n'), StandardCharsets.UTF_8)
 
-    val headerTokens = frameHeader.trim.split(" ")
-    if (headerTokens.length != 3) {
-      return Failure(new InvalidFrameException("Frame header must contain 3 fields"))
-    }
-    val commandCode = headerTokens(0)
-    val command = Command.fromString(commandCode)
-    if (command.isEmpty) {
-      return Failure(new InvalidFrameException("Frame header contains invalid command " + commandCode))
-    }
-
-    val lenStr = headerTokens(1)
-    val frameLength = Try(lenStr.toInt)
-    if (frameLength.isFailure) {
-      return Failure(new InvalidFrameException("Frame header contains invalid length " + lenStr))
-    }
-    if (frameLength.get < 0) {
-      return Failure(new InvalidFrameException("Frame header contains negative length"))
-    }
-
-    val seqNoStr = headerTokens(2)
-    val seqNo = Try(seqNoStr.toInt)
-    if (seqNo.isFailure) {
-      return Failure(new InvalidFrameException("Frame header contains invalid sequence number " + seqNoStr))
-    }
-
-    var currentLine = readLineFromStream(stream)
-    val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]
-    val routingObjects = new mutable.ArrayBuffer[RoutingObject]
-    val payloadObjects = new mutable.ArrayBuffer[PayloadObject]
-
-    while (currentLine != "end") {
-      val tokens = currentLine.split(" ")
-      if (tokens.length != 3) {
-        return Failure(new InvalidFrameException("Item header must contain 3 elements: " + currentLine))
+      val headerTokens = frameHeader.trim.split(" ")
+      if (headerTokens.length != 3) {
+        return Failure(new InvalidFrameException("Frame header must contain 3 fields"))
       }
-      val length = Try(tokens(2).toInt)
-      if (length.isFailure) {
-        return Failure(new InvalidFrameException("Invalid length in item header: " + currentLine))
-      }
-      if (length.get < 0) {
-        return Failure(new InvalidFrameException("Negative length in item header: " + currentLine))
+      val commandCode = headerTokens(0)
+      val command = Command.fromString(commandCode)
+      if (command.isEmpty) {
+        return Failure(new InvalidFrameException("Frame header contains invalid command " + commandCode))
       }
 
-      tokens(0) match {
-        case "kv" =>
-          val key = tokens(1)
-          val body = new Array[Byte](length.get)
-          stream.read(body, 0, length.get)
-          kvPairs.append((key, body))
-          // Remove trailing '\n'
-          stream.read()
-
-        case "ro" =>
-          val routingObjNumStr = tokens(1)
-          val routingObjNum = Try(routingObjNumStr.toInt)
-          if (routingObjNum.isFailure) {
-            return Failure(new InvalidFrameException("Invalid routing object number: " + routingObjNumStr))
-          }
-          if (routingObjNum.get < 0 || routingObjNum.get > 255) {
-            return Failure(new InvalidFrameException(
-              "Routing object number outside of acceptable range: " + routingObjNumStr))
-          }
-
-          val body = new Array[Byte](length.get)
-          stream.read(body, 0, length.get)
-          val ro = new RoutingObject(routingObjNum.get, body)
-          routingObjects += ro
-
-          // Strip trailing '\n'
-          stream.read()
-
-        case "po" =>
-          val payloadTypeStr = tokens(1)
-          val parsedType = PayloadObject.typeFromString(payloadTypeStr)
-          if (parsedType.isFailure) {
-            return Failure(new InvalidFrameException("Invalid payload object type: " + payloadTypeStr))
-          }
-          val (poTypeOctet, poTypeNum) = parsedType.get
-          val body = new Array[Byte](length.get)
-          stream.read(body, 0, length.get)
-          val po = new PayloadObject(poTypeOctet, poTypeNum, body)
-          payloadObjects += po
-
-           // Strip trailing '\n'
-           stream.read()
-
-        case _ =>
-          return Failure(new InvalidFrameException("Invalid frame item header: " + currentLine))
+      val lenStr = headerTokens(1)
+      val frameLength = Try(lenStr.toInt)
+      if (frameLength.isFailure) {
+        return Failure(new InvalidFrameException("Frame header contains invalid length " + lenStr))
       }
-      currentLine = readLineFromStream(stream)
-    }
+      if (frameLength.get < 0) {
+        return Failure(new InvalidFrameException("Frame header contains negative length"))
+      }
 
-    Success(new Frame(seqNo.get, command.get, kvPairs.toList, routingObjects.toList, payloadObjects.toList))
+      val seqNoStr = headerTokens(2)
+      val seqNo = Try(seqNoStr.toInt)
+      if (seqNo.isFailure) {
+        return Failure(new InvalidFrameException("Frame header contains invalid sequence number " + seqNoStr))
+      }
+
+      var currentLine = readLineFromStream(stream)
+      val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]
+      val routingObjects = new mutable.ArrayBuffer[RoutingObject]
+      val payloadObjects = new mutable.ArrayBuffer[PayloadObject]
+
+      while (currentLine != "end") {
+        val tokens = currentLine.split(" ")
+        if (tokens.length != 3) {
+          return Failure(new InvalidFrameException("Item header must contain 3 elements: " + currentLine))
+        }
+        val length = Try(tokens(2).toInt)
+        if (length.isFailure) {
+          return Failure(new InvalidFrameException("Invalid length in item header: " + currentLine))
+        }
+        if (length.get < 0) {
+          return Failure(new InvalidFrameException("Negative length in item header: " + currentLine))
+        }
+
+        tokens(0) match {
+          case "kv" =>
+            val key = tokens(1)
+            val body = new Array[Byte](length.get)
+            stream.read(body, 0, length.get)
+            kvPairs.append((key, body))
+            // Remove trailing '\n'
+            stream.read()
+
+          case "ro" =>
+            val routingObjNumStr = tokens(1)
+            val routingObjNum = Try(routingObjNumStr.toInt)
+            if (routingObjNum.isFailure) {
+              return Failure(new InvalidFrameException("Invalid routing object number: " + routingObjNumStr))
+            }
+            if (routingObjNum.get < 0 || routingObjNum.get > 255) {
+              return Failure(new InvalidFrameException(
+                "Routing object number outside of acceptable range: " + routingObjNumStr))
+            }
+
+            val body = new Array[Byte](length.get)
+            stream.read(body, 0, length.get)
+            val ro = new RoutingObject(routingObjNum.get, body)
+            routingObjects += ro
+
+            // Strip trailing '\n'
+            stream.read()
+
+          case "po" =>
+            val payloadTypeStr = tokens(1)
+            val parsedType = PayloadObject.typeFromString(payloadTypeStr)
+            if (parsedType.isFailure) {
+              return Failure(new InvalidFrameException("Invalid payload object type: " + payloadTypeStr))
+            }
+            val (poTypeOctet, poTypeNum) = parsedType.get
+            val body = new Array[Byte](length.get)
+            stream.read(body, 0, length.get)
+            val po = new PayloadObject(poTypeOctet, poTypeNum, body)
+            payloadObjects += po
+
+            // Strip trailing '\n'
+            stream.read()
+
+          case _ =>
+            return Failure(new InvalidFrameException("Invalid frame item header: " + currentLine))
+        }
+        currentLine = readLineFromStream(stream)
+      }
+
+      new Frame(seqNo.get, command.get, kvPairs.toList, routingObjects.toList, payloadObjects.toList)
+    }
   }
 
   private def readUntil(stream: InputStream, end: Byte): Array[Byte] = {

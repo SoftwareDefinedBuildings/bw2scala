@@ -1,7 +1,7 @@
 package edu.berkeley.cs.sdb.bw2
 
 import java.io.{FileInputStream, BufferedInputStream, File}
-import java.net.Socket
+import java.net.{SocketException, Socket}
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -39,23 +39,25 @@ class BosswaveClient(val hostName: String, val port: Int) {
     socket.close()
   }
 
-  def setEntity(key: Array[Byte], handler: Response => Unit): Unit = {
+  def setEntity(key: Array[Byte], responseHandler: Option[Response => Unit]): Unit = {
     val seqNo = Frame.generateSequenceNumber
     val po = new PayloadObject(Some((1, 0, 1, 2)), None, key)
     val frame = new Frame(seqNo, SET_ENTITY, payloadObjects = Seq(po))
     frame.writeToStream(outStream)
     outStream.flush()
-    installResponseHandler(seqNo, handler)
+    responseHandler foreach { handler =>
+      installResponseHandler(seqNo, handler)
+    }
   }
 
-  def setEntityFile(f: File, handler: Response => Unit): Unit = {
+  def setEntityFile(f: File, responseHandler: Option[Response => Unit]): Unit = {
     val stream = new BufferedInputStream(new FileInputStream(f))
     val keyFile = new Array[Byte]((f.length() - 1).toInt)
     stream.read() // Strip the first byte
     stream.read(keyFile, 0, keyFile.length)
     stream.close()
 
-    setEntity(keyFile, handler)
+    setEntity(keyFile, responseHandler)
   }
 
   def publish(uri: String, responseHandler: Option[Response => Unit] = None, persist: Boolean = false,
@@ -336,6 +338,9 @@ class BosswaveClient(val hostName: String, val port: Int) {
           case Failure(InvalidFrameException(msg)) =>
             println(msg) // We can safely ignore invalid frames
 
+          case Failure(_: SocketException) =>
+            () // This should only occur when we are terminating the client and is safe to ignore
+
           case Failure(e) =>
             throw new RuntimeException(e)
 
@@ -343,16 +348,20 @@ class BosswaveClient(val hostName: String, val port: Int) {
             responseHandlers.synchronized { responseHandlers.get(seqNo) } foreach { handler =>
               val (_, rawStatus) = kvPairs.find { case (key, _) => key == "status" }.get
               val status = new String(rawStatus, StandardCharsets.UTF_8)
-              val (_, rawReason) = kvPairs.find { case (key, _) => key == "reason" }.get
-              val reason = new String(rawReason, StandardCharsets.UTF_8)
+              val reason = status match {
+                case "okay" => None
+                case _ =>
+                  val (_, rawReason) = kvPairs.find { case (key, _) => key == "reason" }.get
+                  Some(new String(rawReason, StandardCharsets.UTF_8))
+              }
               handler.apply(new Response(status, reason))
             }
 
           case Success(Frame(seqNo, RESULT, kvPairs, routingObjects, payloadObjects)) =>
             messageHandlers.synchronized { messageHandlers.get(seqNo) } foreach { handler =>
-              val (_, rawUri) = kvPairs.find { case (key, _) => key == "status" }.get
+              val (_, rawUri) = kvPairs.find { case (key, _) => key == "uri" }.get
               val uri = new String(rawUri, StandardCharsets.UTF_8)
-              val (_, rawFrom) = kvPairs.find { case (key, _) => key == "status" }.get
+              val (_, rawFrom) = kvPairs.find { case (key, _) => key == "from" }.get
               val from = new String(rawFrom, StandardCharsets.UTF_8)
 
               val unpack = kvPairs.find { case (key, _) => key == "unpack" } match {
@@ -394,4 +403,4 @@ class BosswaveClient(val hostName: String, val port: Int) {
 }
 
 case class Message(from: String, to: String, routingObjects: Seq[RoutingObject], payloadObjects: Seq[PayloadObject])
-case class Response(status: String, reason: String)
+case class Response(status: String, reason: Option[String])
