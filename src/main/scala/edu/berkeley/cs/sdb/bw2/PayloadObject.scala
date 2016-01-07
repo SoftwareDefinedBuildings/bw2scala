@@ -8,19 +8,18 @@ import scala.util.{Failure, Success, Try}
 case class PayloadObject(octet: Option[(Int, Int, Int, Int)], number: Option[Int], content: Array[Byte]) {
   require(octet.isDefined || number.isDefined)
 
-  def typeToString: String =
+  private def typeToString: String =
     octet match {
-      case None => String.format(":%d", number.get)
+      case None => f":${number.get}%d"
       case Some(oct) =>
         number match {
-          case None => String.format("%d.%d.%d.%d:", oct._1, oct._2, oct._3, oct._4)
-          case Some(num) => String.format("%d.%d.%d.%d:%d", oct._1, oct._2, oct._3, oct._4, num)
-          case Some(num) => String.format("%d.%d.%d.%d:%d", oct._1, oct._2, oct._3, oct._4, num)
+          case None => f"${oct._1}%d.${oct._2}%d.${oct._3}%d.${oct._4}%d:"
+          case Some(num) => f"${oct._1}%d.${oct._2}%d.${oct._3}%d.${oct._4}%d:$num%d"
         }
     }
 
   def writeToStream(stream: OutputStream): Unit = {
-    val header = String.format("po %s %d\n", typeToString, content.length)
+    val header = f"po $typeToString%s ${content.length}%d\n"
     stream.write(header.getBytes(StandardCharsets.UTF_8))
     stream.write(content)
     stream.write('\n')

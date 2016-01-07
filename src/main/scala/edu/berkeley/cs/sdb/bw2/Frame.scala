@@ -9,11 +9,11 @@ import scala.util.{Success, Failure, Try, Random}
 case class Frame(seqNo: Int, command: Command, kvPairs: Seq[(String, Array[Byte])] = Nil,
                  routingObjects: Seq[RoutingObject] = Nil, payloadObjects: Seq[PayloadObject] = Nil) {
   def writeToStream(stream: OutputStream): Unit = {
-    val header = String.format("%s 0000000000 %010d\n", command.code, seqNo)
+    val header = f"${command.code}%s 0000000000 $seqNo%010d\n"
     stream.write(header.getBytes(StandardCharsets.UTF_8))
 
     kvPairs foreach { case (key, value) =>
-      val kvHeader = String.format("kv %s %d\n", key, value.length)
+      val kvHeader = f"kv $key%s ${value.length}%d"
       stream.write(kvHeader.getBytes(StandardCharsets.UTF_8))
       stream.write(value)
       stream.write('\n')

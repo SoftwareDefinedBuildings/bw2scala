@@ -19,7 +19,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
     case Failure(e) =>
       close()
       throw new RuntimeException(e)
-    case Success(Frame(_, HELLO, _, _))  => () // No further action is needed
+    case Success(Frame(_, HELLO, _, _, _))  => () // No further action is needed
     case Success(_) =>
       throw new RuntimeException("Received invalid Bosswave ACK")
   }
@@ -72,7 +72,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
-      kvPairs.append(("expiryDelta", String.format("%dms", expDelta).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
     }
     primaryAccessChain foreach { pac =>
       kvPairs.append(("primary_access_chain", pac.getBytes(StandardCharsets.UTF_8)))
@@ -105,7 +105,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
-      kvPairs.append(("expiryDelta", String.format("%dms", expDelta).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
     }
     primaryAccessChain foreach { pac =>
       kvPairs.append(("primary_access_chain", pac.getBytes(StandardCharsets.UTF_8)))
@@ -144,7 +144,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
-      kvPairs.append(("expirydelta", String.format("%dms", expDelta).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
     }
     primaryAccessChain foreach { pac =>
       kvPairs.append(("primary_access_chain", pac.getBytes(StandardCharsets.UTF_8)))
@@ -180,7 +180,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
-      kvPairs.append(("expiryDelta", String.format("%dms", expDelta).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
     }
     primaryAccessChain foreach { pac =>
       kvPairs.append(("primary_access_chain", pac.getBytes(StandardCharsets.UTF_8)))
@@ -222,8 +222,8 @@ class BosswaveClient(val hostName: String, val port: Int) {
     expiry foreach { exp =>
       kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
-    expiryDelta foreach {expDelta =>
-      kvPairs.append(("expiryDelta", String.format("%dms", expDelta).getBytes(StandardCharsets.UTF_8)))
+    expiryDelta foreach { expDelta =>
+      kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
     }
 
     revokers foreach { revoker =>
@@ -265,7 +265,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
-      kvPairs.append(("expiryDelta", String.format("%dms", expDelta).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
     }
     accessPermissions foreach { perms =>
       kvPairs.append(("accesspermissions", perms.getBytes(StandardCharsets.UTF_8)))
@@ -357,7 +357,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
 
               val unpack = kvPairs.find { case (key, _) => key == "unpack" } match {
                 case None => true
-                case Some(_, rawUnpack) => Try(new String(rawUnpack, StandardCharsets.UTF_8).toBoolean) match {
+                case Some((_, rawUnpack)) => Try(new String(rawUnpack, StandardCharsets.UTF_8).toBoolean) match {
                   case Failure(_) => true
                   case Success(bool) => bool
                 }
@@ -385,6 +385,8 @@ class BosswaveClient(val hostName: String, val port: Int) {
               }
               handler.apply(result)
             }
+
+          case Success(_) => () // Ignore any invalid frames
         }
       }
     }
