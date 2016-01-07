@@ -13,7 +13,7 @@ case class Frame(seqNo: Int, command: Command, kvPairs: Seq[(String, Array[Byte]
     stream.write(header.getBytes(StandardCharsets.UTF_8))
 
     kvPairs foreach { case (key, value) =>
-      val kvHeader = f"kv $key%s ${value.length}%d"
+      val kvHeader = f"kv $key%s ${value.length}%d\n"
       stream.write(kvHeader.getBytes(StandardCharsets.UTF_8))
       stream.write(value)
       stream.write('\n')
@@ -28,19 +28,15 @@ case class Frame(seqNo: Int, command: Command, kvPairs: Seq[(String, Array[Byte]
 case class InvalidFrameException(msg: String) extends Exception
 
 object Frame {
-  private val BW_HEADER_LEN = 27
-
   val random = new Random()
 
   def generateSequenceNumber: Int =
     Math.abs(random.nextInt())
 
   def readFromStream(stream: InputStream): Try[Frame] = {
-    val headerBytes = new Array[Byte](BW_HEADER_LEN)
-    stream.read(headerBytes, 0, BW_HEADER_LEN)
-    val frameHeader = new String(headerBytes, StandardCharsets.UTF_8)
+    val frameHeader = new String(readUntil(stream, '\n'), StandardCharsets.UTF_8)
 
-    val headerTokens = frameHeader.split(" ")
+    val headerTokens = frameHeader.trim.split(" ")
     if (headerTokens.length != 3) {
       return Failure(new InvalidFrameException("Frame header must contain 3 fields"))
     }
@@ -70,9 +66,12 @@ object Frame {
     val routingObjects = new mutable.ArrayBuffer[RoutingObject]
     val payloadObjects = new mutable.ArrayBuffer[PayloadObject]
 
-    while (currentLine != "end\n") {
+    while (currentLine != "end") {
       val tokens = currentLine.split(" ")
-      val length = Try(tokens(1).toInt)
+      if (tokens.length != 3) {
+        return Failure(new InvalidFrameException("Item header must contain 3 elements: " + currentLine))
+      }
+      val length = Try(tokens(2).toInt)
       if (length.isFailure) {
         return Failure(new InvalidFrameException("Invalid length in item header: " + currentLine))
       }
@@ -129,7 +128,7 @@ object Frame {
       currentLine = readLineFromStream(stream)
     }
 
-    Success(new Frame(seqNo.get, command.get, kvPairs.toSeq, routingObjects.toSeq, payloadObjects.toSeq))
+    Success(new Frame(seqNo.get, command.get, kvPairs.toList, routingObjects.toList, payloadObjects.toList))
   }
 
   private def readUntil(stream: InputStream, end: Byte): Array[Byte] = {

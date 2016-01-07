@@ -24,6 +24,14 @@ case class PayloadObject(octet: Option[(Int, Int, Int, Int)], number: Option[Int
     stream.write(content)
     stream.write('\n')
   }
+
+  // Necessary because Scala does not have nice array equality checks
+  override def equals(other: Any): Boolean =
+    other match {
+      case po: PayloadObject =>
+        this.octet == po.octet && this.number == po.number && this.content.sameElements(po.content)
+      case _ => false
+    }
 }
 
 object PayloadObject {

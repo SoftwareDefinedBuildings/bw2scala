@@ -10,4 +10,11 @@ case class RoutingObject(number: Int, body: Array[Byte]) {
     stream.write(body)
     stream.write('\n')
   }
+
+  // Necessary because Scala does not have nice array equality checks
+  override def equals(other: Any): Boolean =
+    other match {
+      case ro: RoutingObject => this.number == ro.number && this.body.sameElements(ro.body)
+      case _ => false
+    }
 }
