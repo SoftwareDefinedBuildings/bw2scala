@@ -7,7 +7,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 import scala.util.{Failure, Success, Try}
 
 class BosswaveClient(val hostName: String, val port: Int) {
@@ -139,7 +138,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
            routingObjects: Seq[RoutingObject] = Nil): Unit = {
     val seqNo = Frame.generateSequenceNumber
 
-    val kvPairs = new ArrayBuffer[(String, Array[Byte])]()
+    val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
     kvPairs.append(("uri", uri.getBytes(StandardCharsets.UTF_8)))
     expiry foreach { exp =>
       kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
@@ -169,10 +168,10 @@ class BosswaveClient(val hostName: String, val port: Int) {
   }
 
   def query(uri: String, responseHandler: Option[Response => Unit] = None,
-                messageHandler: Option[Message => Unit] = None, expiry: Option[Date] = None,
-                expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
-                elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false, leavePacked: Boolean = false,
-                routingObjects: Seq[RoutingObject] = Nil): Unit = {
+            messageHandler: Option[Message => Unit] = None, expiry: Option[Date] = None,
+            expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
+            elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false,
+            leavePacked: Boolean = false, routingObjects: Seq[RoutingObject] = Nil): Unit = {
     val seqNo = Frame.generateSequenceNumber
 
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
@@ -213,7 +212,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
                  omitCreationDate: Boolean = false): Unit = {
     val seqNo = Frame.generateSequenceNumber
 
-    val kvPairs = new ArrayBuffer[(String, Array[Byte])]()
+    val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
     contact foreach { ctct =>
       kvPairs.append(("contact", ctct.getBytes(StandardCharsets.UTF_8)))
     }
@@ -251,7 +250,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
               uri: Option[String] = None): Unit = {
     val seqNo = Frame.generateSequenceNumber
 
-    val kvPairs = new ArrayBuffer[(String, Array[Byte])]()
+    val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
     kvPairs.append(("to", to.getBytes(StandardCharsets.UTF_8)))
     timeToLive foreach { ttl =>
       kvPairs.append(("ttl", ttl.toString.getBytes(StandardCharsets.UTF_8)))
@@ -266,7 +265,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
-      kvPairs.append(("expiryDelta", String.format("%dms").getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiryDelta", String.format("%dms", expDelta).getBytes(StandardCharsets.UTF_8)))
     }
     accessPermissions foreach { perms =>
       kvPairs.append(("accesspermissions", perms.getBytes(StandardCharsets.UTF_8)))
@@ -293,7 +292,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
                 messageHandler: Option[Message => Unit] = None): Unit = {
     val seqNo = Frame.generateSequenceNumber
 
-    val kvPairs = new ArrayBuffer[(String, Array[Byte])]()
+    val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
     kvPairs.append(("ispermission", isPermission.toString.getBytes(StandardCharsets.UTF_8)))
     kvPairs.append(("unelaborate", unelaborate.toString.getBytes(StandardCharsets.UTF_8)))
     dots foreach { dot =>

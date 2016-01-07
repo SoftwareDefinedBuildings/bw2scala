@@ -3,7 +3,7 @@ package edu.berkeley.cs.sdb.bw2
 import java.io.{OutputStream, InputStream}
 import java.nio.charset.StandardCharsets
 
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable
 import scala.util.{Success, Failure, Try, Random}
 
 case class Frame(seqNo: Int, command: Command, kvPairs: Seq[(String, Array[Byte])] = Nil,
@@ -66,9 +66,9 @@ object Frame {
     }
 
     var currentLine = readLineFromStream(stream)
-    val kvPairs = new ArrayBuffer[(String, Array[Byte])]
-    val routingObjects = new ArrayBuffer[RoutingObject]
-    val payloadObjects = new ArrayBuffer[PayloadObject]
+    val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]
+    val routingObjects = new mutable.ArrayBuffer[RoutingObject]
+    val payloadObjects = new mutable.ArrayBuffer[PayloadObject]
 
     while (currentLine != "end\n") {
       val tokens = currentLine.split(" ")
@@ -133,7 +133,7 @@ object Frame {
   }
 
   private def readUntil(stream: InputStream, end: Byte): Array[Byte] = {
-    val buffer = new ArrayBuffer[Byte]()
+    val buffer = new mutable.ArrayBuffer[Byte]()
     var b = stream.read().toByte
     while (b != -1 && b != end) {
       buffer.append(b)
