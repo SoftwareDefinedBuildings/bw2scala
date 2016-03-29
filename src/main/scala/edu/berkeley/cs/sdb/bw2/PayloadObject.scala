@@ -6,7 +6,9 @@ import java.nio.charset.StandardCharsets
 import scala.util.{Failure, Success, Try}
 
 case class PayloadObject(octet: Option[(Int, Int, Int, Int)], number: Option[Int], content: Array[Byte]) {
-  require(octet.isDefined || number.isDefined)
+  require(octet.isDefined || number.isDefined, "Must define type octet or number")
+  require(octet.isEmpty || number.isEmpty || PayloadObject.validateTypeBoth(octet.get, number.get),
+      "Payload type octet and number disagree")
 
   private def typeToString: String =
     octet match {
@@ -35,6 +37,11 @@ case class PayloadObject(octet: Option[(Int, Int, Int, Int)], number: Option[Int
 }
 
 object PayloadObject {
+  private def validateTypeBoth(octet: (Int, Int, Int, Int), number: Int): Boolean = {
+    val octetValue = (octet._1 << 24) + (octet._2 << 16) + (octet._3 << 8) + octet._4
+    octetValue == number
+  }
+
   private def parseOctet(s: String): Try[(Int, Int, Int, Int)] = {
     val tokens = s.split('.')
     if (tokens.length != 4) {
@@ -60,8 +67,6 @@ object PayloadObject {
       val poNum = Try(s.substring(1).toInt)
       if (poNum.isFailure) {
         Failure(new IllegalArgumentException("Payload object type contains invalid number"))
-      } else if (poNum.get < 0 || poNum.get > 99) {
-        Failure(new IllegalArgumentException("Payload object type number must contain 1 or 2 digits"))
       } else {
         Success((None, Some(poNum.get)))
       }
@@ -88,10 +93,10 @@ object PayloadObject {
       if (poNum.isFailure) {
         return Failure(new IllegalArgumentException("Payload object type contains invalid number"))
       }
-      if (poNum.get < 0 || poNum.get > 99) {
-        return Failure(new IllegalArgumentException("Payload object type number must contain 1 or 2 digits"))
-      }
 
+      if (!PayloadObject.validateTypeBoth(octet.get, poNum.get)) {
+        return Failure(new IllegalArgumentException("Payload object type octet and number disagree"))
+      }
       Success((Some(octet.get), Some(poNum.get)))
     }
   }

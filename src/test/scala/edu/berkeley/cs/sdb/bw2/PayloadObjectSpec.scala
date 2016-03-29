@@ -36,12 +36,12 @@ class PayloadObjectSpec extends FunSuite {
 
   test("PaylodObject writeToStream with Octet and Number Type") {
     val content = "This is a test".getBytes(StandardCharsets.UTF_8)
-    val po = new PayloadObject(Some((4, 8, 15, 16)), Some(23), content)
+    val po = new PayloadObject(Some((4, 8, 15, 16)), Some(67637008), content)
 
     val outStream = new ByteArrayOutputStream()
     po.writeToStream(outStream)
 
-    val expectedOutput = "po 4.8.15.16:23 14\nThis is a test\n"
+    val expectedOutput = "po 4.8.15.16:67637008 14\nThis is a test\n"
     val actualOutput = outStream.toString(StandardCharsets.UTF_8.name)
     assert(expectedOutput == actualOutput)
 

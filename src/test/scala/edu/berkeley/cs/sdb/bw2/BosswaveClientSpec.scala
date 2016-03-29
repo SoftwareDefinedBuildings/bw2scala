@@ -55,7 +55,7 @@ class BosswaveClientSpec extends FunSuite with BeforeAndAfter {
     semaphore.acquire() // Block until the subscribe operation is complete
 
     expectedMessages foreach { msg =>
-      val po = new PayloadObject(Some((64, 0, 0, 0)), Some(4), msg.getBytes(StandardCharsets.UTF_8))
+      val po = new PayloadObject(Some((64, 0, 0, 0)), None, msg.getBytes(StandardCharsets.UTF_8))
       client.publish("castle.bw2.io/foo/bar", primaryAccessChain = Some("lGhzBEz_uyAz2sOjJ9kmfyJEl1MakBZP3mKC-DNCNYE="),
                      payloadObjects = Seq(po), responseHandler = Some(responseHandler))
     }
