@@ -5,10 +5,12 @@ import java.net.{Socket, SocketException, SocketTimeoutException}
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.concurrent.Semaphore
 
 import scala.collection.mutable
-import scala.concurrent.{Channel, Future, blocking}
+import scala.concurrent.{Await, Channel, Future, blocking}
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.Duration
 import scala.util.{Failure, Success, Try}
 
 object BosswaveClient {
@@ -52,7 +54,7 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
 
   private val responses = new mutable.HashMap[Int, Channel[BosswaveResponse]]
   private val resultHandlers = new mutable.HashMap[Int, (BosswaveResult => Unit)]
-  private val listResultHandlers = new mutable.HashMap[Int, (String => Unit)]
+  private val listResultHandlers = new mutable.HashMap[Int, (Option[String] => Unit)]
 
   def close(): Unit = {
     listener.stop()
@@ -169,9 +171,10 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
     blocking { awaitResponse(seqNo) }
   }
 
-  def list(uri: String, listResultHandler: (String => Unit), expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
-           primaryAccessChain: Option[String] = None,  elaboratePac: ElaborationLevel = UNSPECIFIED,
-           autoChain: Boolean = false, routingObjects: Seq[RoutingObject] = Nil): Future[BosswaveResponse] = Future {
+  def list(uri: String, listResultHandler: (Option[String] => Unit), expiry: Option[Date] = None,
+           expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
+           elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false,
+           routingObjects: Seq[RoutingObject] = Nil): Future[BosswaveResponse] = Future {
     val seqNo = Frame.generateSequenceNumber
 
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
@@ -199,6 +202,28 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
       listResultHandlers.put(seqNo, listResultHandler)
     }
     blocking { awaitResponse(seqNo) }
+  }
+
+  def listAll(uri: String, expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
+              primaryAccessChain: Option[String] = None, elaboratePac: ElaborationLevel = UNSPECIFIED,
+              autoChain: Boolean = false, routingObjects: Seq[RoutingObject] = Nil): Future[Seq[String]] = Future {
+    val results = mutable.ArrayBuffer.empty[String]
+    val semaphore = new Semaphore(0)
+    val handler: (Option[String] => Unit) = {
+      case None => semaphore.release()
+      case Some(result) => results.append(result)
+    }
+
+    val resp = blocking {
+      Await.result(list(uri, handler, expiry, expiryDelta, primaryAccessChain, elaboratePac,
+          autoChain, routingObjects), Duration.Inf)
+    }
+    if (resp.status != "okay") {
+      throw BosswaveException("List operation failed: " + resp.reason.get)
+    }
+
+    blocking { semaphore.acquire() }
+    results
   }
 
   def query(uri: String, resultHandler: (BosswaveResult => Unit), expiry: Option[Date] = None,
@@ -234,6 +259,31 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
 
     resultHandlers.synchronized { resultHandlers.put(seqNo, resultHandler) }
     blocking { awaitResponse(seqNo) }
+  }
+
+  def queryAll(uri: String, expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
+               primaryAccessChain: Option[String] = None, elaboratePac: ElaborationLevel = UNSPECIFIED,
+               autoChain: Boolean = false, leavePacked: Boolean = false, routingObjects: Seq[RoutingObject] = Nil):
+               Future[Seq[BosswaveResult]] = Future {
+    val results = mutable.ArrayBuffer.empty[BosswaveResult]
+    val semaphore = new Semaphore(0)
+    val handler: (BosswaveResult => Unit) = { result =>
+      results.append(result)
+      if (BosswaveClient.getFirstBoolean(result.kvPairs, "finished", default = false)) {
+        semaphore.release()
+      }
+    }
+
+    val resp = blocking {
+      Await.result(query(uri, handler, expiry, expiryDelta, primaryAccessChain, elaboratePac, autoChain,
+          leavePacked, routingObjects), Duration.Inf)
+    }
+    if (resp.status != "okay") {
+      throw BosswaveException("Query failed: " + resp.reason.get)
+    }
+
+    blocking { semaphore.acquire() }
+    results
   }
 
   def makeEntity(contact: Option[String] = None, comment: Option[String] = None, expiry: Option[Date] = None,
@@ -351,7 +401,7 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
                   val (_, rawReason) = kvPairs.find { case (key, _) => key == "reason" }.get
                   Some(new String(rawReason, StandardCharsets.UTF_8))
               }
-              chan.write(new BosswaveResponse(status, reason))
+              chan.write(BosswaveResponse(status, reason))
 
               if (reason.isDefined) {
                 // If error, garbage collect handlers
@@ -371,9 +421,9 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
 
               val unpack = BosswaveClient.getFirstBoolean(kvPairs, "unpack", default = true)
               val message = if (unpack) {
-                new BosswaveResult(from, uri, routingObjects, payloadObjects)
+                BosswaveResult(from, uri, kvPairs, routingObjects, payloadObjects)
               } else {
-                new BosswaveResult(from, uri, Nil, Nil)
+                BosswaveResult(from, uri, kvPairs, Nil, Nil)
               }
 
               handler.apply(message)
@@ -383,9 +433,10 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
             }
 
             listResultHandlers.synchronized { listResultHandlers.get(seqNo) } foreach { handler =>
-              val result = if (finished) null else {
+              val result = if (finished) None else {
                 val (_, rawResult) = kvPairs.find { case (key, _) => key == "child" }.get
-                new String(rawResult, StandardCharsets.UTF_8)
+                val s = new String(rawResult, StandardCharsets.UTF_8)
+                Some(s)
               }
               handler.apply(result)
               if (finished) {
@@ -405,4 +456,6 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
 }
 
 case class BosswaveResponse(status: String, reason: Option[String])
-case class BosswaveResult(from: String, to: String, routingObjects: Seq[RoutingObject], payloadObjects: Seq[PayloadObject])
+
+case class BosswaveResult(from: String, to: String, kvPairs: Seq[(String, Array[Byte])],
+                          routingObjects: Seq[RoutingObject], payloadObjects: Seq[PayloadObject])
