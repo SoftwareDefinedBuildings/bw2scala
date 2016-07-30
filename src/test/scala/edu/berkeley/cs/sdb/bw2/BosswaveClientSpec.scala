@@ -6,6 +6,10 @@ import java.util.concurrent.Semaphore
 
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
+import scala.util.{Failure, Success}
+
 class BosswaveClientSpec extends FunSuite with BeforeAndAfter {
   val BW_URI = "scratch.ns/unittests/scala"
   val expectedMessages = Set("Hello, World!", "Bosswave 2", "Lorem ipsum", "dolor sit amet")
@@ -15,13 +19,7 @@ class BosswaveClientSpec extends FunSuite with BeforeAndAfter {
   val semaphore = new Semaphore(0)
   var count = expectedMessages.size
 
-  val responseHandler: (BosswaveResponse => Unit) = { case BosswaveResponse(status, reason) =>
-      if (status != "okay") {
-        throw new RuntimeException("Bosswave operation failed: " + reason.get)
-      }
-  }
-
-  val messageHandler: (BosswaveMessage => Unit) = { case BosswaveMessage(_, _, _, pos) =>
+  val messageHandler: (BosswaveResult => Unit) = { case BosswaveResult(_, _, _, pos) =>
       assert(pos.length == 1)
       val message = new String(pos.head.content, StandardCharsets.UTF_8)
       if (expectedMessages.contains(message)) {
@@ -34,23 +32,15 @@ class BosswaveClientSpec extends FunSuite with BeforeAndAfter {
 
   before {
     val entityPathUri = getClass.getResource("/unitTests.key").toURI
-    client.setEntityFile(new File(entityPathUri), Some({ case BosswaveResponse(status, reason) =>
-        if (status != "okay") {
-          fail("Set entity failed: " + reason.get)
-        } else {
-          semaphore.release()
-        }
-    }))
-    semaphore.acquire()
-
-    val handler: (BosswaveResponse => Unit) = { case BosswaveResponse(status, reason) =>
-      if (status == "okay") {
-        semaphore.release()
-      } else {
-        throw new RuntimeException("Failed to subscribe: " + reason.get)
-      }
+    val entResp = Await.result(client.setEntityFile(new File(entityPathUri)), Duration.Inf)
+    if (entResp.status != "okay") {
+      throw new RuntimeException("Failed to set entity: " + entResp.reason.get)
     }
-    client.subscribe(BW_URI, responseHandler = Some(handler), messageHandler = Some(messageHandler))
+
+    val subResp = Await.result(client.subscribe(BW_URI, messageHandler), Duration.Inf)
+    if (subResp.status != "okay") {
+      throw new RuntimeException("Failed to subscribe: " + subResp.reason.get)
+    }
   }
 
   after {
@@ -62,7 +52,13 @@ class BosswaveClientSpec extends FunSuite with BeforeAndAfter {
 
     expectedMessages foreach { msg =>
       val po = new PayloadObject(Some((64, 0, 0, 0)), None, msg.getBytes(StandardCharsets.UTF_8))
-      client.publish(BW_URI,  payloadObjects = Seq(po), responseHandler = Some(responseHandler))
+      client.publish(BW_URI,  payloadObjects = Seq(po)).onComplete {
+        case Success(BosswaveResponse(status, reason)) =>
+          if (status != "okay") {
+            fail("Publish failed: " + reason.get)
+          }
+        case Failure(cause) => fail(cause)
+      }
     }
 
     semaphore.acquire() // Wait until all published messages have been received
