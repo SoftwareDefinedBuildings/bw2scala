@@ -66,7 +66,7 @@ class FrameSpec extends FunSuite {
 
   test("Read frame with payload object from stream") {
     val frameStr = "subs 0000000059 0000000410\n" +
-      "po 1.2.3.4:25 11\n" +
+      "po 1.2.3.4:16909060 11\n" +
       "testPayload\n" +
       "end\n"
     val frameContent = frameStr.getBytes(StandardCharsets.UTF_8)
@@ -82,7 +82,7 @@ class FrameSpec extends FunSuite {
     assert(frame.routingObjects.isEmpty)
 
     val payloadContent = "testPayload".getBytes(StandardCharsets.UTF_8)
-    val expectedPayloadObjects = Seq(PayloadObject(Some((1, 2, 3, 4)), Some(25), payloadContent))
+    val expectedPayloadObjects = Seq(PayloadObject(Some((1, 2, 3, 4)), Some(16909060), payloadContent))
     assert(frame.payloadObjects == expectedPayloadObjects)
   }
 

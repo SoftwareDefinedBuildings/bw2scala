@@ -1,7 +1,7 @@
 package edu.berkeley.cs.sdb.bw2
 
-import java.io.{FileInputStream, BufferedInputStream, File}
-import java.net.{SocketException, Socket}
+import java.io.{BufferedInputStream, File, FileInputStream}
+import java.net.{Socket, SocketException, SocketTimeoutException}
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -9,10 +9,19 @@ import java.util.Date
 import scala.collection.mutable
 import scala.util.{Failure, Success, Try}
 
-class BosswaveClient(val hostName: String, val port: Int) {
-  val socket = new Socket(hostName, port)
-  val inStream = socket.getInputStream
-  val outStream = socket.getOutputStream
+object BosswaveClient {
+  val BW_PORT = 28589 // Bosswave IANA Port Number
+  private val SOCK_TIMEOUT_MS = 2000 // Frame read timeout length
+  val RFC_3339 = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX")
+}
+
+class BosswaveClient(val hostName: String = "localhost", val port: Int = BosswaveClient.BW_PORT) {
+  private var autoChain: Option[Boolean] = None
+
+  private val socket = new Socket(hostName, port)
+  socket.setSoTimeout(BosswaveClient.SOCK_TIMEOUT_MS)
+  private val inStream = socket.getInputStream
+  private val outStream = socket.getOutputStream
 
   // Check that we receive a well-formed acknowledgment
   Frame.readFromStream(inStream) match {
@@ -25,23 +34,29 @@ class BosswaveClient(val hostName: String, val port: Int) {
   }
 
   // Start up thread to listen for incoming frames
-  new Thread(new BWListener()).start()
+  private val listener = new BWListener()
+  private val listenerThread = new Thread(listener)
+  listenerThread.start()
 
-  val responseHandlers = new mutable.HashMap[Int, Response => Unit]()
-  val messageHandlers = new mutable.HashMap[Int, Message => Unit]()
-  val listResultHandlers = new mutable.HashMap[Int, String => Unit]()
-
-  val RFC_3339 = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX")
+  private val responseHandlers = new mutable.HashMap[Int, BosswaveResponse => Unit]()
+  private val messageHandlers = new mutable.HashMap[Int, BosswaveMessage => Unit]()
+  private val listResultHandlers = new mutable.HashMap[Int, String => Unit]()
 
   def close(): Unit = {
+    listener.stop()
     inStream.close()
     outStream.close()
     socket.close()
+    listenerThread.join()
   }
 
-  def setEntity(key: Array[Byte], responseHandler: Option[Response => Unit]): Unit = {
+  def overrideAutoChainTo(autoChain: Boolean) = {
+    this.autoChain = Some(autoChain)
+  }
+
+  def setEntity(key: Array[Byte], responseHandler: Option[BosswaveResponse => Unit]): Unit = {
     val seqNo = Frame.generateSequenceNumber
-    val po = new PayloadObject(Some((1, 0, 1, 2)), None, key)
+    val po = new PayloadObject(Some((0, 0, 0, 50)), None, key)
     val frame = new Frame(seqNo, SET_ENTITY, payloadObjects = Seq(po))
     frame.writeToStream(outStream)
     outStream.flush()
@@ -50,7 +65,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
     }
   }
 
-  def setEntityFile(f: File, responseHandler: Option[Response => Unit]): Unit = {
+  def setEntityFile(f: File, responseHandler: Option[BosswaveResponse => Unit]): Unit = {
     val stream = new BufferedInputStream(new FileInputStream(f))
     val keyFile = new Array[Byte]((f.length() - 1).toInt)
     stream.read() // Strip the first byte
@@ -60,7 +75,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
     setEntity(keyFile, responseHandler)
   }
 
-  def publish(uri: String, responseHandler: Option[Response => Unit] = None, persist: Boolean = false,
+  def publish(uri: String, responseHandler: Option[BosswaveResponse => Unit] = None, persist: Boolean = false,
               primaryAccessChain: Option[String] = None, expiry: Option[Date] = None,
               expiryDelta: Option[Long] = None, elaboratePac: ElaborationLevel = UNSPECIFIED,
               autoChain: Boolean = false, routingObjects: Seq[RoutingObject] = Nil,
@@ -71,7 +86,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
     kvPairs.append(("uri", uri.getBytes(StandardCharsets.UTF_8)))
     expiry foreach { exp =>
-      kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiry", BosswaveClient.RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
       kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
@@ -86,7 +101,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("auto_chain", "true".getBytes(StandardCharsets.UTF_8)))
     }
 
-    val frame = new Frame(seqNo, command, kvPairs.toSeq, routingObjects, payloadObjects)
+    val frame = new Frame(seqNo, command, kvPairs, routingObjects, payloadObjects)
     frame.writeToStream(outStream)
     outStream.flush()
     responseHandler foreach { handler =>
@@ -94,8 +109,8 @@ class BosswaveClient(val hostName: String, val port: Int) {
     }
   }
 
-  def subscribe(uri: String, responseHandler: Option[Response => Unit] = None,
-                messageHandler: Option[Message => Unit] = None, expiry: Option[Date] = None,
+  def subscribe(uri: String, responseHandler: Option[BosswaveResponse => Unit] = None,
+                messageHandler: Option[BosswaveMessage => Unit] = None, expiry: Option[Date] = None,
                 expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
                 elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false, leavePacked: Boolean = false,
                 routingObjects: Seq[RoutingObject] = Nil): Unit = {
@@ -104,7 +119,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
     kvPairs.append(("uri", uri.getBytes(StandardCharsets.UTF_8)))
     expiry foreach { exp =>
-      kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiry", BosswaveClient.RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
       kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
@@ -122,7 +137,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("unpack", "true".getBytes(StandardCharsets.UTF_8)))
     }
 
-    val frame = new Frame(seqNo, SUBSCRIBE, kvPairs.toSeq, routingObjects, Nil)
+    val frame = new Frame(seqNo, SUBSCRIBE, kvPairs, routingObjects, Nil)
     frame.writeToStream(outStream)
     outStream.flush()
     responseHandler foreach { handler =>
@@ -133,7 +148,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
     }
   }
 
-  def list(uri: String, responseHandler: Option[Response => Unit] = None,
+  def list(uri: String, responseHandler: Option[BosswaveResponse => Unit] = None,
            listResultHandler: Option[String => Unit] = None, expiry: Option[Date] = None,
            expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
            elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false,
@@ -143,7 +158,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
     kvPairs.append(("uri", uri.getBytes(StandardCharsets.UTF_8)))
     expiry foreach { exp =>
-      kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiry", BosswaveClient.RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
       kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
@@ -158,7 +173,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("autochain", "true".getBytes(StandardCharsets.UTF_8)))
     }
 
-    val frame = new Frame(seqNo, LIST, kvPairs.toSeq, routingObjects, Nil)
+    val frame = new Frame(seqNo, LIST, kvPairs, routingObjects, Nil)
     frame.writeToStream(outStream)
     outStream.flush()
     responseHandler foreach { handler =>
@@ -169,8 +184,8 @@ class BosswaveClient(val hostName: String, val port: Int) {
     }
   }
 
-  def query(uri: String, responseHandler: Option[Response => Unit] = None,
-            messageHandler: Option[Message => Unit] = None, expiry: Option[Date] = None,
+  def query(uri: String, responseHandler: Option[BosswaveResponse => Unit] = None,
+            messageHandler: Option[BosswaveMessage => Unit] = None, expiry: Option[Date] = None,
             expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
             elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false,
             leavePacked: Boolean = false, routingObjects: Seq[RoutingObject] = Nil): Unit = {
@@ -179,7 +194,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
     kvPairs.append(("uri", uri.getBytes(StandardCharsets.UTF_8)))
     expiry foreach { exp =>
-      kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiry", BosswaveClient.RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
       kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
@@ -197,7 +212,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("unpack", "true".getBytes(StandardCharsets.UTF_8)))
     }
 
-    val frame = new Frame(seqNo, QUERY, kvPairs.toSeq, routingObjects)
+    val frame = new Frame(seqNo, QUERY, kvPairs, routingObjects)
     frame.writeToStream(outStream)
     outStream.flush()
     responseHandler foreach { handler =>
@@ -208,7 +223,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
     }
   }
 
-  def makeEntity(responseHandler: Option[Response => Unit], messageHandler: Option[Message => Unit] = None,
+  def makeEntity(responseHandler: Option[BosswaveResponse => Unit], messageHandler: Option[BosswaveMessage => Unit] = None,
                  contact: Option[String] = None, comment: Option[String] = None, expiry: Option[Date] = None,
                  expiryDelta: Option[Long] = None, revokers: Seq[String] = Nil,
                  omitCreationDate: Boolean = false): Unit = {
@@ -222,7 +237,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("comment", cmmt.getBytes(StandardCharsets.UTF_8)))
     }
     expiry foreach { exp =>
-      kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiry", BosswaveClient.RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
       kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
@@ -234,7 +249,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
 
     kvPairs.append(("omitcreationdate", omitCreationDate.toString.getBytes(StandardCharsets.UTF_8)))
 
-    val frame = new Frame(seqNo, MAKE_ENTITY, kvPairs.toSeq, Nil, Nil)
+    val frame = new Frame(seqNo, MAKE_ENTITY, kvPairs, Nil, Nil)
     frame.writeToStream(outStream)
     outStream.flush()
     responseHandler foreach { handler =>
@@ -245,7 +260,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
     }
   }
 
-  def makeDot(to: String, responseHandler: Option[Response => Unit], messageHandler: Option[Message => Unit] = None,
+  def makeDot(to: String, responseHandler: Option[BosswaveResponse => Unit], messageHandler: Option[BosswaveMessage => Unit] = None,
               timeToLive: Option[Int], isPermission: Boolean= false, contact: Option[String] = None,
               comment: Option[String] = None, expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
               revokers: Seq[String] = Nil, omitCreationDate: Boolean = false, accessPermissions: Option[String] = None,
@@ -264,7 +279,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("comment", cmmt.getBytes(StandardCharsets.UTF_8)))
     }
     expiry foreach { exp =>
-      kvPairs.append(("expiry", RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
+      kvPairs.append(("expiry", BosswaveClient.RFC_3339.format(exp).getBytes(StandardCharsets.UTF_8)))
     }
     expiryDelta foreach { expDelta =>
       kvPairs.append(("expiryDelta", f"$expDelta%dms".getBytes(StandardCharsets.UTF_8)))
@@ -278,7 +293,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("reovker", revoker.getBytes(StandardCharsets.UTF_8)))
     }
 
-    val frame = new Frame(seqNo, MAKE_DOT, kvPairs.toSeq, Nil, Nil)
+    val frame = new Frame(seqNo, MAKE_DOT, kvPairs, Nil, Nil)
     frame.writeToStream(outStream)
     outStream.flush()
     responseHandler foreach { handler =>
@@ -290,8 +305,8 @@ class BosswaveClient(val hostName: String, val port: Int) {
   }
 
   def makeChain(isPermission: Boolean, unelaborate: Boolean, dots: Seq[String],
-                responseHandler: Option[Response => Unit] = None,
-                messageHandler: Option[Message => Unit] = None): Unit = {
+                responseHandler: Option[BosswaveResponse => Unit] = None,
+                messageHandler: Option[BosswaveMessage => Unit] = None): Unit = {
     val seqNo = Frame.generateSequenceNumber
 
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
@@ -301,7 +316,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
       kvPairs.append(("dot", dot.getBytes(StandardCharsets.UTF_8)))
     }
 
-    val frame = new Frame(seqNo, MAKE_CHAIN, kvPairs.toSeq, Nil, Nil)
+    val frame = new Frame(seqNo, MAKE_CHAIN, kvPairs, Nil, Nil)
     frame.writeToStream(outStream)
     outStream.flush()
     responseHandler foreach { handler =>
@@ -312,13 +327,13 @@ class BosswaveClient(val hostName: String, val port: Int) {
     }
   }
 
-  private def installResponseHandler(seqNo: Int, handler: Response => Unit): Unit = {
+  private def installResponseHandler(seqNo: Int, handler: BosswaveResponse => Unit): Unit = {
     responseHandlers.synchronized {
       responseHandlers.put(seqNo, handler)
     }
   }
 
-  private def installMessageHandler(seqNo: Int, handler: Message => Unit): Unit = {
+  private def installMessageHandler(seqNo: Int, handler: BosswaveMessage => Unit): Unit = {
     messageHandlers.synchronized {
       messageHandlers.put(seqNo, handler)
     }
@@ -331,12 +346,18 @@ class BosswaveClient(val hostName: String, val port: Int) {
   }
 
   private class BWListener extends Runnable {
+    @volatile
+    private var continueRunning = true
+
     override def run(): Unit = {
-      while (true) {
+      while (continueRunning) {
         val nextFrame = Frame.readFromStream(inStream)
         nextFrame match {
           case Failure(InvalidFrameException(msg)) =>
             println(msg) // We can safely ignore invalid frames
+
+          case Failure(_: SocketTimeoutException) =>
+            () // Safe to Ignore, loop back and check 'continueRunning'
 
           case Failure(_: SocketException) =>
             () // This should only occur when we are terminating the client and is safe to ignore
@@ -354,7 +375,7 @@ class BosswaveClient(val hostName: String, val port: Int) {
                   val (_, rawReason) = kvPairs.find { case (key, _) => key == "reason" }.get
                   Some(new String(rawReason, StandardCharsets.UTF_8))
               }
-              handler.apply(new Response(status, reason))
+              handler.apply(new BosswaveResponse(status, reason))
             }
 
           case Success(Frame(seqNo, RESULT, kvPairs, routingObjects, payloadObjects)) =>
@@ -373,9 +394,9 @@ class BosswaveClient(val hostName: String, val port: Int) {
               }
 
               val message = if (unpack) {
-                new Message(from, uri, routingObjects, payloadObjects)
+                new BosswaveMessage(from, uri, routingObjects, payloadObjects)
               } else {
-                new Message(from, uri, Nil, Nil)
+                new BosswaveMessage(from, uri, Nil, Nil)
               }
 
               handler.apply(message)
@@ -399,8 +420,12 @@ class BosswaveClient(val hostName: String, val port: Int) {
         }
       }
     }
+
+    def stop(): Unit = {
+      continueRunning = false
+    }
   }
 }
 
-case class Message(from: String, to: String, routingObjects: Seq[RoutingObject], payloadObjects: Seq[PayloadObject])
-case class Response(status: String, reason: Option[String])
+case class BosswaveMessage(from: String, to: String, routingObjects: Seq[RoutingObject], payloadObjects: Seq[PayloadObject])
+case class BosswaveResponse(status: String, reason: Option[String])

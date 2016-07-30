@@ -4,7 +4,7 @@ import java.io.{OutputStream, InputStream}
 import java.nio.charset.StandardCharsets
 
 import scala.collection.mutable
-import scala.util.{Success, Failure, Try, Random}
+import scala.util.{Failure, Random, Try}
 
 case class Frame(seqNo: Int, command: Command, kvPairs: Seq[(String, Array[Byte])] = Nil,
                  routingObjects: Seq[RoutingObject] = Nil, payloadObjects: Seq[PayloadObject] = Nil) {
