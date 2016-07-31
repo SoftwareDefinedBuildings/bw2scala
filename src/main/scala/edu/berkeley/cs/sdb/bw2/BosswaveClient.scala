@@ -8,8 +8,7 @@ import java.util.Date
 import java.util.concurrent.Semaphore
 
 import scala.collection.mutable
-import scala.concurrent.{Await, Channel, Future, blocking}
-import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent._
 import scala.concurrent.duration.Duration
 import scala.util.{Failure, Success, Try}
 
@@ -84,7 +83,8 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
     resp
   }
 
-  def setEntity(key: Array[Byte]): Future[BosswaveResponse] = Future {
+  def setEntity(key: Array[Byte])(implicit ec: ExecutionContext = ExecutionContext.global):
+      Future[BosswaveResponse] = Future {
     val seqNo = Frame.generateSequenceNumber
     val po = new PayloadObject(Some((0, 0, 0, 50)), None, key)
     val frame = new Frame(seqNo, SET_ENTITY, payloadObjects = Seq(po))
@@ -105,10 +105,9 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
   }
 
   def publish(uri: String, persist: Boolean = false, primaryAccessChain: Option[String] = None,
-              expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
-              elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false,
-              routingObjects: Seq[RoutingObject] = Nil,
-              payloadObjects: Seq[PayloadObject] = Nil): Future[BosswaveResponse] = Future {
+              expiry: Option[Date] = None, expiryDelta: Option[Long] = None, elaboratePac: ElaborationLevel = UNSPECIFIED,
+              autoChain: Boolean = false, routingObjects: Seq[RoutingObject] = Nil, payloadObjects: Seq[PayloadObject] = Nil)
+             (implicit ec: ExecutionContext = ExecutionContext.global): Future[BosswaveResponse] = Future {
     val seqNo = Frame.generateSequenceNumber
     val command = if (persist) PERSIST else PUBLISH
 
@@ -137,10 +136,10 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
     blocking { awaitResponse(seqNo) }
   }
 
-  def subscribe(uri: String, resultHandler: (BosswaveResult => Unit), expiry: Option[Date] = None,
-                expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
-                elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false, leavePacked: Boolean = false,
-                routingObjects: Seq[RoutingObject] = Nil): Future[BosswaveResponse] = Future {
+  def subscribe(uri: String, resultHandler: (BosswaveResult => Unit), expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
+                primaryAccessChain: Option[String] = None, elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false,
+                leavePacked: Boolean = false, routingObjects: Seq[RoutingObject] = Nil)
+               (implicit ec: ExecutionContext = ExecutionContext.global): Future[BosswaveResponse] = Future {
     val seqNo = Frame.generateSequenceNumber
 
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
@@ -171,10 +170,10 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
     blocking { awaitResponse(seqNo) }
   }
 
-  def list(uri: String, listResultHandler: (Option[String] => Unit), expiry: Option[Date] = None,
-           expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
-           elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false,
-           routingObjects: Seq[RoutingObject] = Nil): Future[BosswaveResponse] = Future {
+  def list(uri: String, listResultHandler: (Option[String] => Unit), expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
+           primaryAccessChain: Option[String] = None, elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false,
+           routingObjects: Seq[RoutingObject] = Nil)
+          (implicit ec: ExecutionContext = ExecutionContext.global): Future[BosswaveResponse] = Future {
     val seqNo = Frame.generateSequenceNumber
 
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
@@ -204,9 +203,9 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
     blocking { awaitResponse(seqNo) }
   }
 
-  def listAll(uri: String, expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
-              primaryAccessChain: Option[String] = None, elaboratePac: ElaborationLevel = UNSPECIFIED,
-              autoChain: Boolean = false, routingObjects: Seq[RoutingObject] = Nil): Future[Seq[String]] = Future {
+  def listAll(uri: String, expiry: Option[Date] = None, expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
+              elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false, routingObjects: Seq[RoutingObject] = Nil)
+             (implicit ec: ExecutionContext = ExecutionContext.global): Future[Seq[String]] = Future {
     val results = mutable.ArrayBuffer.empty[String]
     val semaphore = new Semaphore(0)
     val handler: (Option[String] => Unit) = {
@@ -226,10 +225,10 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
     results
   }
 
-  def query(uri: String, resultHandler: (BosswaveResult => Unit), expiry: Option[Date] = None,
-            expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
-            elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false,  leavePacked: Boolean = false,
-            routingObjects: Seq[RoutingObject] = Nil): Future[BosswaveResponse] = Future {
+  def query(uri: String, resultHandler: (BosswaveResult => Unit), expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
+            primaryAccessChain: Option[String] = None, elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false,
+            leavePacked: Boolean = false, routingObjects: Seq[RoutingObject] = Nil)
+           (implicit ec: ExecutionContext = ExecutionContext.global): Future[BosswaveResponse] = Future {
     val seqNo = Frame.generateSequenceNumber
 
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
@@ -261,9 +260,9 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
     blocking { awaitResponse(seqNo) }
   }
 
-  def queryAll(uri: String, expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
-               primaryAccessChain: Option[String] = None, elaboratePac: ElaborationLevel = UNSPECIFIED,
-               autoChain: Boolean = false, leavePacked: Boolean = false, routingObjects: Seq[RoutingObject] = Nil):
+  def queryAll(uri: String, expiry: Option[Date] = None, expiryDelta: Option[Long] = None, primaryAccessChain: Option[String] = None,
+               elaboratePac: ElaborationLevel = UNSPECIFIED, autoChain: Boolean = false, leavePacked: Boolean = false,
+               routingObjects: Seq[RoutingObject] = Nil) (implicit ec: ExecutionContext = ExecutionContext.global):
                Future[Seq[BosswaveResult]] = Future {
     val results = mutable.ArrayBuffer.empty[BosswaveResult]
     val semaphore = new Semaphore(0)
@@ -287,8 +286,8 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
   }
 
   def makeEntity(contact: Option[String] = None, comment: Option[String] = None, expiry: Option[Date] = None,
-                 expiryDelta: Option[Long] = None, revokers: Seq[String] = Nil, omitCreationDate: Boolean = false):
-                 Future[BosswaveResponse]  = Future {
+                 expiryDelta: Option[Long] = None, revokers: Seq[String] = Nil, omitCreationDate: Boolean = false)
+                (implicit ec: ExecutionContext = ExecutionContext.global): Future[BosswaveResponse]  = Future {
     val seqNo = Frame.generateSequenceNumber
 
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
@@ -319,7 +318,8 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
   def makeDot(to: String, timeToLive: Option[Int], isPermission: Boolean= false, contact: Option[String] = None,
               comment: Option[String] = None, expiry: Option[Date] = None, expiryDelta: Option[Long] = None,
               revokers: Seq[String] = Nil, omitCreationDate: Boolean = false, accessPermissions: Option[String] = None,
-              uri: Option[String] = None): Future[BosswaveResponse] = Future {
+              uri: Option[String] = None) (implicit ec: ExecutionContext = ExecutionContext.global):
+              Future[BosswaveResponse] = Future {
     val seqNo = Frame.generateSequenceNumber
 
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
@@ -354,7 +354,8 @@ class BosswaveClient(val hostName: String = "localhost", val port: Int = Bosswav
     blocking { awaitResponse(seqNo) }
   }
 
-  def makeChain(isPermission: Boolean, unelaborate: Boolean, dots: Seq[String]): Future[BosswaveResponse] = Future {
+  def makeChain(isPermission: Boolean, unelaborate: Boolean, dots: Seq[String])
+               (implicit ec: ExecutionContext = ExecutionContext.global): Future[BosswaveResponse] = Future {
     val seqNo = Frame.generateSequenceNumber
 
     val kvPairs = new mutable.ArrayBuffer[(String, Array[Byte])]()
