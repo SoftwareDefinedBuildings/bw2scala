@@ -9,19 +9,21 @@ import scala.util.{Failure, Random, Try}
 case class Frame(seqNo: Int, command: Command, kvPairs: Seq[(String, Array[Byte])] = Nil,
                  routingObjects: Seq[RoutingObject] = Nil, payloadObjects: Seq[PayloadObject] = Nil) {
   def writeToStream(stream: OutputStream): Unit = {
-    val header = f"${command.code}%s 0000000000 $seqNo%010d\n"
-    stream.write(header.getBytes(StandardCharsets.UTF_8))
+    stream.synchronized {
+      val header = f"${command.code}%s 0000000000 $seqNo%010d\n"
+      stream.write(header.getBytes(StandardCharsets.UTF_8))
 
-    kvPairs foreach { case (key, value) =>
-      val kvHeader = f"kv $key%s ${value.length}%d\n"
-      stream.write(kvHeader.getBytes(StandardCharsets.UTF_8))
-      stream.write(value)
-      stream.write('\n')
+      kvPairs foreach { case (key, value) =>
+        val kvHeader = f"kv $key%s ${value.length}%d\n"
+        stream.write(kvHeader.getBytes(StandardCharsets.UTF_8))
+        stream.write(value)
+        stream.write('\n')
+      }
+      routingObjects foreach (_.writeToStream(stream))
+      payloadObjects foreach (_.writeToStream(stream))
+
+      stream.write("end\n".getBytes(StandardCharsets.UTF_8))
     }
-    routingObjects foreach(_.writeToStream(stream))
-    payloadObjects foreach(_.writeToStream(stream))
-
-    stream.write("end\n".getBytes(StandardCharsets.UTF_8))
   }
 }
 
