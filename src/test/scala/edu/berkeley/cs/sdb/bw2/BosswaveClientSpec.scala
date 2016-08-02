@@ -4,12 +4,12 @@ import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Semaphore
 
+import edu.berkeley.cs.sdb.bw2.BosswaveClient._
 import org.scalatest.{BeforeAndAfterAll, FunSuite}
 
 import scala.concurrent.Await
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
-import scala.util.{Failure, Success}
+import scala.concurrent.ExecutionContext.Implicits.global
 
 class BosswaveClientSpec extends FunSuite with BeforeAndAfterAll {
   val expectedMessages = Set("Hello, World!", "Bosswave 2", "Lorem ipsum", "dolor sit amet")
@@ -42,29 +42,20 @@ class BosswaveClientSpec extends FunSuite with BeforeAndAfterAll {
         semaphore.release()
       }
     }
-    val subResp = Await.result( client.subscribe("scratch.ns/unittests/scala", messageHandler), Duration.Inf)
-    if (subResp.status != "okay") {
-      fail(subResp.reason.get)
-    }
+    client.subscribe("scratch.ns/unittests/scala", messageHandler).completeOrExit()
 
     expectedMessages foreach { msg =>
-      val po = new PayloadObject(Some((64, 0, 0, 0)), None, msg.getBytes(StandardCharsets.UTF_8))
-      client.publish("scratch.ns/unittests/scala",  payloadObjects = Seq(po)).onComplete {
-        case Success(BosswaveResponse(status, reason)) =>
-          if (status != "okay") {
-            fail("Publish failed: " + reason.get)
-          }
-        case Failure(cause) => fail(cause)
-      }
+      val po = new PayloadObject(Some(POAllocations.PODFString), content = msg.getBytes(StandardCharsets.UTF_8))
+      client.publish("scratch.ns/unittests/scala",  payloadObjects = Seq(po)).exitIfError()
     }
 
     semaphore.acquire() // Wait until all published messages have been received
   }
 
   test("Publish to URI without requisite permissions") {
-    val po = new PayloadObject(Some((64, 0, 0, 0)), None, "Hello, World".getBytes(StandardCharsets.UTF_8))
+    val po = new PayloadObject(Some(POAllocations.PODFString), content = "Hello, World".getBytes(StandardCharsets.UTF_8))
     // Client should not have permission on this URI
-    val resp = Await.result(client.publish("jkolb/unittests", payloadObjects = Seq(po)), Duration.Inf)
+    val resp = client.publish("jkolb/unittests", payloadObjects = Seq(po)).await()
     assert(resp.status != "okay" && resp.reason.isDefined)
   }
 
@@ -79,9 +70,9 @@ class BosswaveClientSpec extends FunSuite with BeforeAndAfterAll {
     )
 
     persistedData foreach { case (planet, probe) =>
-      val po = new PayloadObject(Some((64, 0, 0, 0)), None, probe.getBytes(StandardCharsets.UTF_8))
-      val resp = Await.result(client.publish("scratch.ns/unittests/scala/persisted/" + planet, persist = true,
-        payloadObjects = Seq(po)), Duration.Inf)
+      val po = new PayloadObject(Some(POAllocations.PODFString), content = probe.getBytes(StandardCharsets.UTF_8))
+      val resp = client.publish("scratch.ns/unittests/scala/persisted/" + planet, persist = true,
+                                payloadObjects = Seq(po)).await()
       if (resp.status != "okay") {
         fail("Publish failed: " + resp.reason.get)
       }
@@ -99,19 +90,21 @@ class BosswaveClientSpec extends FunSuite with BeforeAndAfterAll {
       }
     }
     assert(persistedData.keys == uris.toSet)
-    val queryValues = queryResults.filter(_.payloadObjects.nonEmpty) map { queryResult =>
-      new String(queryResult.payloadObjects.head.content, StandardCharsets.UTF_8)
+    val queryValues = queryResults flatMap { queryResult =>
+      queryResult.payloadObjects.find(_.octet.contains(POAllocations.PODFString)).map { po =>
+        new String(po.content, StandardCharsets.UTF_8)
+      }
     }
     assert(queryValues.toSet == persistedData.values.toSet)
   }
 
   test("Query URI without requisite permissions") {
-    val resp = Await.result(client.query("jkolb/unittest", { _ => () }), Duration.Inf)
+    val resp = client.query("jkolb/unittest", { _ => () }).await()
     assert(resp.status != "okay" && resp.reason.isDefined)
   }
 
   test("List URI without requisite permissions") {
-    val resp = Await.result(client.query("jkolb/unittest", { _ => () }), Duration.Inf)
+    val resp = client.query("jkolb/unittest", { _ => () }).await()
     assert(resp.status != "okay" && resp.reason.isDefined)
   }
 }

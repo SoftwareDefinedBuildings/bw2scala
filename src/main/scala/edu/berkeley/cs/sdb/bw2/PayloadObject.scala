@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets
 
 import scala.util.{Failure, Success, Try}
 
-case class PayloadObject(octet: Option[(Int, Int, Int, Int)], number: Option[Int], content: Array[Byte]) {
+case class PayloadObject(octet: Option[(Int, Int, Int, Int)] = None, number: Option[Int] = None, content: Array[Byte]) {
   require(octet.isDefined || number.isDefined, "Must define type octet or number")
   require(octet.isEmpty || number.isEmpty || PayloadObject.validateTypeBoth(octet.get, number.get),
       "Payload type octet and number disagree")

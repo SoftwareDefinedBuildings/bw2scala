@@ -27,11 +27,27 @@ object BosswaveClient {
     }
   }
 
-  def compeleteOrExit(f: Future[BosswaveResponse]): Unit = {
-    val resp = Await.result(f, Duration.Inf)
-    if (resp.status != "okay") {
-      println(resp.reason.get)
-      System.exit(1)
+  implicit class BosswaveFuture(val f: Future[BosswaveResponse]) {
+    def completeOrExit()(implicit ec: ExecutionContext): Unit = {
+      val resp = Await.result(f, Duration.Inf)
+      if (resp.status != "okay") {
+        println(resp.reason.get)
+        System.exit(1)
+      }
+    }
+
+    def exitIfError()(implicit ec: ExecutionContext): Unit = f.onComplete {
+      case Failure(cause) =>
+        throw new RuntimeException(cause)
+      case Success(BosswaveResponse(status, reason)) =>
+        if (status != "okay") {
+          println(reason.get)
+          System.exit(1)
+        }
+    }
+
+    def await(duration: Duration = Duration.Inf)(implicit ec: ExecutionContext): BosswaveResponse = {
+      Await.result(f, duration)
     }
   }
 }
