@@ -77,7 +77,7 @@ example, to block until a publish is finished and check for errors:
 ```scala
 val resp = Await.result(client.publish("scratch.ns/test", payloadObjects = ...), Duration.Inf)
 if (resp.status != "okay") {
-  println("Bosswave publish failed: " +_ resp.reason.get)
+  println("Bosswave publish failed: " + resp.reason.get)
 }
 ```
 
